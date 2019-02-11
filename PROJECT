@@ -1,0 +1,3 @@
+version: "1"
+domain: example.org
+repo: github.com/droot/crd-conversion-example
