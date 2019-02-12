@@ -16,13 +16,15 @@ limitations under the License.
 package defaultserver
 
 import (
-	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/runtime/serializer/json"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/droot/crd-conversion-example/pkg/apis/jobs/v1"
 	"github.com/droot/crd-conversion-example/pkg/apis/jobs/v2"
@@ -106,14 +108,21 @@ func Add(mgr manager.Manager) error {
 	svr.HandleFunc("/convert", func(w http.ResponseWriter, r *http.Request) {
 		log.Info("got a convert request")
 
+		var body []byte
+		if r.Body != nil {
+			if data, err := ioutil.ReadAll(r.Body); err == nil {
+				body = data
+			}
+		}
 		// body, err := ioutil.ReadAll(r.Body)
 		// if err != nil {
 		// 	log.Error(err, "error reading the request body")
 		// }
-		convertReview := &apix.ConversionReview{}
+		convertReview := apix.ConversionReview{}
 
+		serializer := json.NewSerializer(json.DefaultMetaFactory, mgr.GetScheme(), mgr.GetScheme(), false)
 		// d := newDecoder(mgr.GetScheme())
-		err := json.NewDecoder(r.Body).Decode(convertReview)
+		_, _, err := serializer.Decode(body, nil, &convertReview)
 		if err != nil {
 			log.Error(err, "error decoding conversion request")
 			// TODO(droot): define helper for returning conversion error
@@ -122,10 +131,10 @@ func Add(mgr manager.Manager) error {
 			return
 		}
 
-		convertReview.Response = doConversion(mgr.GetScheme(), convertReview.Request)
+		convertReview.Response = doConversion(serializer, mgr.GetScheme(), convertReview.Request)
 		convertReview.Response.UID = convertReview.Request.UID
 
-		err = json.NewEncoder(w).Encode(convertReview)
+		err = serializer.Encode(&convertReview, w)
 		if err != nil {
 			log.Error(err, "error encoding conversion request")
 			// TODO(droot): define helper for returning conversion error
@@ -138,9 +147,57 @@ func Add(mgr manager.Manager) error {
 	return svr.Register(webhooks...)
 }
 
+func convertExternalJobV1ToV2(from *v1.ExternalJob, to *v2.ExternalJob) error {
+	// var b bytes.Buffer
+	//
+	// from.GetObjectKind().SetGroupVersionKind(to.GetObjectKind().GroupVersionKind())
+	// err := ser.Encode(from, &b)
+	// if err != nil {
+	// 	log.Error(err, "error encoding from object", "from", from)
+	// 	return err
+	// }
+	// log.Info("serialized incoming obj", "from", string(b.Bytes()))
+	// toClone := to.DeepCopyObject()
+	// _, _, err = ser.Decode(b.Bytes(), nil, to)
+	// if err != nil {
+	// 	log.Error(err, "error decoding bytes", "to", to)
+	// 	return err
+	// }
+	// to.GetObjectKind().SetGroupVersionKind(toClone.GetObjectKind().GroupVersionKind())
+
+	to.ObjectMeta = from.ObjectMeta
+
+	log.Info("successfully converted obj", "to-->", to)
+	return nil
+}
+
+func convertExternalJobV2ToV1(from *v2.ExternalJob, to *v1.ExternalJob) error {
+	// var b bytes.Buffer
+	//
+	// from.GetObjectKind().SetGroupVersionKind(to.GetObjectKind().GroupVersionKind())
+	// err := ser.Encode(from, &b)
+	// if err != nil {
+	// 	log.Error(err, "error encoding from object", "from", from)
+	// 	return err
+	// }
+	// log.Info("serialized incoming obj", "from", string(b.Bytes()))
+	// toClone := to.DeepCopyObject()
+	// _, _, err = ser.Decode(b.Bytes(), nil, to)
+	// if err != nil {
+	// 	log.Error(err, "error decoding bytes", "to", to)
+	// 	return err
+	// }
+	// to.GetObjectKind().SetGroupVersionKind(toClone.GetObjectKind().GroupVersionKind())
+
+	to.ObjectMeta = from.ObjectMeta
+
+	log.Info("successfully converted obj", "to-->", to)
+	return nil
+}
+
 // doConversion converts the requested object given the conversion function and returns a conversion response.
 // failures will be reported as Reason in the conversion response.
-func doConversion(scheme *runtime.Scheme, convertRequest *apix.ConversionRequest) *apix.ConversionResponse {
+func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *apix.ConversionRequest) *apix.ConversionResponse {
 	var convertedObjects []runtime.RawExtension
 
 	var conversionCodecs = serializer.NewCodecFactory(scheme)
@@ -153,20 +210,38 @@ func doConversion(scheme *runtime.Scheme, convertRequest *apix.ConversionRequest
 		log.Info("decoding incoming obj", "a", a, "b", b, "a-type", fmt.Sprintf("%T", a))
 		switch convertRequest.DesiredAPIVersion {
 		case "jobs.example.org/v2":
-			v1Obj := &v1.ExternalJob{}
+			v2Obj := &v2.ExternalJob{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "ExternalJob",
+					APIVersion: "jobs.example.org/v2",
+				},
+			}
 			// if err := d.Decode(obj.Raw, v1Obj); err != nil {
 			// 	log.Error(err, "error decoding to v1 obj")
 			// }
-			// log.Info("successfully decoded to obj v1", "object-v1", v1Obj)
 			// do the conversion here
-			convertedObjects = append(convertedObjects, runtime.RawExtension{Object: v1Obj})
+			// _ = convertExternalJob(ser, a, v2Obj)
+			// v2Obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "jobs", Version: "v2", Kind: "ExternalJob"})
+			// v2Obj.TypeMeta.Kind = "ExternalJob"
+			convertExternalJobV1ToV2(a.(*v1.ExternalJob), v2Obj)
+			log.Info("successfully converted to obj v2", "object-v2", v2Obj)
+			convertedObjects = append(convertedObjects, runtime.RawExtension{Object: v2Obj})
 		case "jobs.example.org/v1":
-			v2Obj := &v2.ExternalJob{}
+			v1Obj := &v1.ExternalJob{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "ExternalJob",
+					APIVersion: "jobs.example.org/v1",
+				},
+			}
 			// if err := d.Decode(obj.Raw, v2Obj); err != nil {
 			// 	log.Error(err, "error decoding to v1 obj")
 			// }
-			log.Info("successfully decoded to obj v2", "object-v2", v2Obj)
-			convertedObjects = append(convertedObjects, runtime.RawExtension{Object: v2Obj})
+			// _ = convertExternalJob(ser, a, v1Obj)
+			convertExternalJobV2ToV1(a.(*v2.ExternalJob), v1Obj)
+			// v1Obj.TypeMeta.Kind = "ExternalJob"
+			// v1Obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "jobs", Version: "v1", Kind: "ExternalJob"})
+			log.Info("successfully converted to obj v1", "object-v1", v1Obj)
+			convertedObjects = append(convertedObjects, runtime.RawExtension{Object: v1Obj})
 		default:
 			return conversionResponseFailureWithMessagef("unknown desired version")
 		}
