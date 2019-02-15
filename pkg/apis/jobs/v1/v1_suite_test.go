@@ -40,13 +40,13 @@ func TestMain(m *testing.M) {
 		log.Fatal(err)
 	}
 
-	if cfg, err = t.Start(); err != nil {
-		log.Fatal(err)
-	}
-
-	if c, err = client.New(cfg, client.Options{Scheme: scheme.Scheme}); err != nil {
-		log.Fatal(err)
-	}
+	// if cfg, err = t.Start(); err != nil {
+	// 	log.Fatal(err)
+	// }
+	//
+	// if c, err = client.New(cfg, client.Options{Scheme: scheme.Scheme}); err != nil {
+	// 	log.Fatal(err)
+	// }
 
 	code := m.Run()
 	t.Stop()

@@ -195,6 +195,10 @@ func convertExternalJobV2ToV1(from *v2.ExternalJob, to *v1.ExternalJob) error {
 	return nil
 }
 
+func myConvert(scheme *runtime.Scheme, src runtime.Object, dst runtime.Object) error {
+
+}
+
 // doConversion converts the requested object given the conversion function and returns a conversion response.
 // failures will be reported as Reason in the conversion response.
 func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *apix.ConversionRequest) *apix.ConversionResponse {
@@ -208,6 +212,16 @@ func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *
 			log.Error(err, "error decoding to v1 obj")
 		}
 		log.Info("decoding incoming obj", "a", a, "b", b, "a-type", fmt.Sprintf("%T", a))
+
+		// Its here where we invoke the conversionFunc
+		// or here we figure out if
+		// desired version is Hub Version ?
+		// or incoming version is the Hub version ?
+		// if getTheHub version instance and invoke the converter interface
+		// implementation
+		// if it is spoke, then do the heavy lifting
+		// Also, figuring out the Hub version automatically can be decoupled.
+
 		switch convertRequest.DesiredAPIVersion {
 		case "jobs.example.org/v2":
 			v2Obj := &v2.ExternalJob{

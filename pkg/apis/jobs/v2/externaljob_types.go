@@ -59,3 +59,5 @@ type ExternalJobList struct {
 func init() {
 	SchemeBuilder.Register(&ExternalJob{}, &ExternalJobList{})
 }
+
+func (ej *ExternalJob) Hub() {}

@@ -65,6 +65,7 @@ var DefaultKubeAPIServerFlags = []string{
 	"--insecure-bind-address={{ if .URL }}{{ .URL.Hostname }}{{ end }}",
 	"--secure-port={{ if .SecurePort }}{{ .SecurePort }}{{ end }}",
 	"--admission-control=AlwaysAdmit",
+	"--feature-gates=CustomResourceWebhookConversion=true",
 }
 
 // Environment creates a Kubernetes test environment that will start / stop the Kubernetes control plane and

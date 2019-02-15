@@ -16,7 +16,11 @@ limitations under the License.
 package v1
 
 import (
+	"fmt"
+
+	"github.com/droot/crd-conversion-example/pkg/apis/jobs/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -59,3 +63,41 @@ type ExternalJobList struct {
 func init() {
 	SchemeBuilder.Register(&ExternalJob{}, &ExternalJobList{})
 }
+
+func (ej *ExternalJob) convertToV2ExternalJob(jobV2 *v2.ExternalJob) error {
+	//TODO(droot): figure out how to make it easy
+	jobV2.ObjectMeta = ej.ObjectMeta
+	return nil
+}
+
+func (ej *ExternalJob) convertFromV2ExternalJob(jobv2 *v2.ExternalJob) error {
+	ej.ObjectMeta = jobv2.ObjectMeta
+	return nil
+}
+
+func (ej *ExternalJob) ConvertTo(dst runtime.Object) error {
+	switch t := dst.(type) {
+	case *v2.ExternalJob:
+		return ej.convertToV2ExternalJob(dst.(*v2.ExternalJob))
+	case *ExternalJob:
+		ej.DeepCopyInto(dst.(*ExternalJob))
+		return nil
+	default:
+		return fmt.Errorf("unsupported type %v", t)
+	}
+}
+
+func (ej *ExternalJob) ConvertFrom(src runtime.Object) error {
+	switch t := src.(type) {
+	case *v2.ExternalJob:
+		return ej.convertFromV2ExternalJob(src.(*v2.ExternalJob))
+	case *ExternalJob:
+		src.(*ExternalJob).DeepCopyInto(ej)
+		return nil
+	default:
+		return fmt.Errorf("unsupported type %v", t)
+	}
+}
+
+// Make it a Hub ?
+// func (ej *ExternalJob) Hub() {}
