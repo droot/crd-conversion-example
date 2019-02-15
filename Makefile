@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= gcr.io/sunilarora-sandbox/crd-conversion-example:1.0.29
+IMG ?= gcr.io/sunilarora-sandbox/crd-conversion-example:1.0.30
 
 all: test manager
 

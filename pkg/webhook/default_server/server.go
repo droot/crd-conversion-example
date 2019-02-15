@@ -21,13 +21,13 @@ import (
 	"net/http"
 	"os"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/droot/crd-conversion-example/pkg/apis/jobs/v1"
-	"github.com/droot/crd-conversion-example/pkg/apis/jobs/v2"
 	"github.com/droot/crd-conversion-example/pkg/conversion"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -115,14 +115,9 @@ func Add(mgr manager.Manager) error {
 				body = data
 			}
 		}
-		// body, err := ioutil.ReadAll(r.Body)
-		// if err != nil {
-		// 	log.Error(err, "error reading the request body")
-		// }
 		convertReview := apix.ConversionReview{}
 
 		serializer := json.NewSerializer(json.DefaultMetaFactory, mgr.GetScheme(), mgr.GetScheme(), false)
-		// d := newDecoder(mgr.GetScheme())
 		_, _, err := serializer.Decode(body, nil, &convertReview)
 		if err != nil {
 			log.Error(err, "error decoding conversion request")
@@ -148,54 +143,6 @@ func Add(mgr manager.Manager) error {
 	return svr.Register(webhooks...)
 }
 
-func convertExternalJobV1ToV2(from *v1.ExternalJob, to *v2.ExternalJob) error {
-	// var b bytes.Buffer
-	//
-	// from.GetObjectKind().SetGroupVersionKind(to.GetObjectKind().GroupVersionKind())
-	// err := ser.Encode(from, &b)
-	// if err != nil {
-	// 	log.Error(err, "error encoding from object", "from", from)
-	// 	return err
-	// }
-	// log.Info("serialized incoming obj", "from", string(b.Bytes()))
-	// toClone := to.DeepCopyObject()
-	// _, _, err = ser.Decode(b.Bytes(), nil, to)
-	// if err != nil {
-	// 	log.Error(err, "error decoding bytes", "to", to)
-	// 	return err
-	// }
-	// to.GetObjectKind().SetGroupVersionKind(toClone.GetObjectKind().GroupVersionKind())
-
-	to.ObjectMeta = from.ObjectMeta
-
-	log.Info("successfully converted obj", "to-->", to)
-	return nil
-}
-
-func convertExternalJobV2ToV1(from *v2.ExternalJob, to *v1.ExternalJob) error {
-	// var b bytes.Buffer
-	//
-	// from.GetObjectKind().SetGroupVersionKind(to.GetObjectKind().GroupVersionKind())
-	// err := ser.Encode(from, &b)
-	// if err != nil {
-	// 	log.Error(err, "error encoding from object", "from", from)
-	// 	return err
-	// }
-	// log.Info("serialized incoming obj", "from", string(b.Bytes()))
-	// toClone := to.DeepCopyObject()
-	// _, _, err = ser.Decode(b.Bytes(), nil, to)
-	// if err != nil {
-	// 	log.Error(err, "error decoding bytes", "to", to)
-	// 	return err
-	// }
-	// to.GetObjectKind().SetGroupVersionKind(toClone.GetObjectKind().GroupVersionKind())
-
-	to.ObjectMeta = from.ObjectMeta
-
-	log.Info("successfully converted obj", "to-->", to)
-	return nil
-}
-
 // doConversion converts the requested object given the conversion function and returns a conversion response.
 // failures will be reported as Reason in the conversion response.
 func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *apix.ConversionRequest) *apix.ConversionResponse {
@@ -204,42 +151,23 @@ func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *
 	var conversionCodecs = serializer.NewCodecFactory(scheme)
 	for _, obj := range convertRequest.Objects {
 		log.Info("decoding object", "object", obj)
-		a, b, err := conversionCodecs.UniversalDeserializer().Decode(obj.Raw, nil, nil)
+		a, gvk, err := conversionCodecs.UniversalDeserializer().Decode(obj.Raw, nil, nil)
 		if err != nil {
 			log.Error(err, "error decoding to v1 obj")
 		}
-		log.Info("decoding incoming obj", "a", a, "b", b, "a-type", fmt.Sprintf("%T", a))
+		log.Info("decoding incoming obj", "a", a, "b", gvk, "a-type", fmt.Sprintf("%T", a))
 
-		// Its here where we invoke the conversionFunc
-		// or here we figure out if
-		// desired version is Hub Version ?
-		// or incoming version is the Hub version ?
-		// if getTheHub version instance and invoke the converter interface
-		// implementation
-		// if it is spoke, then do the heavy lifting
-		// Also, figuring out the Hub version automatically can be decoupled.
-
-		targetObj := getTargetObject(convertRequest.DesiredAPIVersion, "ExternalJob")
+		targetObj, err := getTargetObject(scheme, convertRequest.DesiredAPIVersion, gvk.Kind)
+		if err != nil {
+			log.Error(err, "error converting object")
+			return conversionResponseFailureWithMessagef("error converting object")
+		}
 		err = convert(scheme, a, targetObj)
 		if err != nil {
 			log.Error(err, "error converting object")
 			return conversionResponseFailureWithMessagef("error converting object")
 		}
 		convertedObjects = append(convertedObjects, runtime.RawExtension{Object: targetObj})
-		// cr := unstructured.Unstructured{}
-		// if err := cr.UnmarshalJSON(obj.Raw); err != nil {
-		// 	log.Error(err, "failed to unmarshal object", "object", obj.Raw)
-		// 	return conversionResponseFailureWithMessagef("failed to unmarshall object (%v) with error: %v", string(obj.Raw), err)
-		// }
-		// convertedCR, status := convert(&cr, convertRequest.DesiredAPIVersion)
-		// if status.Status != metav1.StatusSuccess {
-		// 	klog.Error(status.String())
-		// 	return &v1beta1.ConversionResponse{
-		// 		Result: status,
-		// 	}
-		// }
-		// convertedCR.SetAPIVersion(convertRequest.DesiredAPIVersion)
-		// convertedObjects = append(convertedObjects, runtime.RawExtension{Object: convertedCR})
 	}
 	return &apix.ConversionResponse{
 		ConvertedObjects: convertedObjects,
@@ -247,27 +175,23 @@ func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *
 	}
 }
 
-func getTargetObject(apiVersion, kind string) runtime.Object {
-	var targetObj runtime.Object
-	switch apiVersion {
-	case "jobs.example.org/v2":
-		targetObj = &v2.ExternalJob{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       kind,
-				APIVersion: apiVersion,
-			},
-		}
-	case "jobs.example.org/v1":
-		targetObj = &v1.ExternalJob{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       kind,
-				APIVersion: apiVersion,
-			},
-		}
-	default:
-		// return conversionResponseFailureWithMessagef("unknown desired version")
+func getTargetObject(myscheme *runtime.Scheme, apiVersion, kind string) (runtime.Object, error) {
+	gvk := schema.FromAPIVersionAndKind(apiVersion, kind)
+
+	obj, err := myscheme.New(gvk)
+	if err != nil {
+		return obj, err
 	}
-	return targetObj
+
+	t, err := meta.TypeAccessor(obj)
+	if err != nil {
+		return obj, err
+	}
+
+	t.SetAPIVersion(apiVersion)
+	t.SetKind(kind)
+
+	return obj, nil
 }
 
 // conversionResponseFailureWithMessagef is a helper function to create an AdmissionResponse
