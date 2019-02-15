@@ -26,6 +26,7 @@ import (
 type ExternalJobSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	ScheduleAt string `json:"scheduleAt"`
 }
 
 // ExternalJobStatus defines the observed state of ExternalJob

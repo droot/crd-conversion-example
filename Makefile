@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= gcr.io/sunilarora-sandbox/crd-conversion-example:1.0.28
+IMG ?= gcr.io/sunilarora-sandbox/crd-conversion-example:1.0.29
 
 all: test manager
 
@@ -27,7 +27,7 @@ deploy:
 
 # Generate manifests e.g. CRD, RBAC etc.
 manifests:
-	# go run vendor/sigs.k8s.io/controller-tools/cmd/controller-gen/main.go all
+	# go run vendor/sigs.k8s.io/controller-tools/cmd/controller-gen/main.go crd
 	# go run vendor/sigs.k8s.io/controller-tools/cmd/controller-gen/main.go webhook
 
 # Run go fmt against code

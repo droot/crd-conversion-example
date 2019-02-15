@@ -28,6 +28,7 @@ import (
 
 	"github.com/droot/crd-conversion-example/pkg/apis/jobs/v1"
 	"github.com/droot/crd-conversion-example/pkg/apis/jobs/v2"
+	"github.com/droot/crd-conversion-example/pkg/conversion"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -195,10 +196,6 @@ func convertExternalJobV2ToV1(from *v2.ExternalJob, to *v1.ExternalJob) error {
 	return nil
 }
 
-func myConvert(scheme *runtime.Scheme, src runtime.Object, dst runtime.Object) error {
-
-}
-
 // doConversion converts the requested object given the conversion function and returns a conversion response.
 // failures will be reported as Reason in the conversion response.
 func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *apix.ConversionRequest) *apix.ConversionResponse {
@@ -222,43 +219,13 @@ func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *
 		// if it is spoke, then do the heavy lifting
 		// Also, figuring out the Hub version automatically can be decoupled.
 
-		switch convertRequest.DesiredAPIVersion {
-		case "jobs.example.org/v2":
-			v2Obj := &v2.ExternalJob{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "ExternalJob",
-					APIVersion: "jobs.example.org/v2",
-				},
-			}
-			// if err := d.Decode(obj.Raw, v1Obj); err != nil {
-			// 	log.Error(err, "error decoding to v1 obj")
-			// }
-			// do the conversion here
-			// _ = convertExternalJob(ser, a, v2Obj)
-			// v2Obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "jobs", Version: "v2", Kind: "ExternalJob"})
-			// v2Obj.TypeMeta.Kind = "ExternalJob"
-			convertExternalJobV1ToV2(a.(*v1.ExternalJob), v2Obj)
-			log.Info("successfully converted to obj v2", "object-v2", v2Obj)
-			convertedObjects = append(convertedObjects, runtime.RawExtension{Object: v2Obj})
-		case "jobs.example.org/v1":
-			v1Obj := &v1.ExternalJob{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "ExternalJob",
-					APIVersion: "jobs.example.org/v1",
-				},
-			}
-			// if err := d.Decode(obj.Raw, v2Obj); err != nil {
-			// 	log.Error(err, "error decoding to v1 obj")
-			// }
-			// _ = convertExternalJob(ser, a, v1Obj)
-			convertExternalJobV2ToV1(a.(*v2.ExternalJob), v1Obj)
-			// v1Obj.TypeMeta.Kind = "ExternalJob"
-			// v1Obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "jobs", Version: "v1", Kind: "ExternalJob"})
-			log.Info("successfully converted to obj v1", "object-v1", v1Obj)
-			convertedObjects = append(convertedObjects, runtime.RawExtension{Object: v1Obj})
-		default:
-			return conversionResponseFailureWithMessagef("unknown desired version")
+		targetObj := getTargetObject(convertRequest.DesiredAPIVersion, "ExternalJob")
+		err = convert(scheme, a, targetObj)
+		if err != nil {
+			log.Error(err, "error converting object")
+			return conversionResponseFailureWithMessagef("error converting object")
 		}
+		convertedObjects = append(convertedObjects, runtime.RawExtension{Object: targetObj})
 		// cr := unstructured.Unstructured{}
 		// if err := cr.UnmarshalJSON(obj.Raw); err != nil {
 		// 	log.Error(err, "failed to unmarshal object", "object", obj.Raw)
@@ -278,6 +245,29 @@ func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *
 		ConvertedObjects: convertedObjects,
 		Result:           statusSucceed(),
 	}
+}
+
+func getTargetObject(apiVersion, kind string) runtime.Object {
+	var targetObj runtime.Object
+	switch apiVersion {
+	case "jobs.example.org/v2":
+		targetObj = &v2.ExternalJob{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       kind,
+				APIVersion: apiVersion,
+			},
+		}
+	case "jobs.example.org/v1":
+		targetObj = &v1.ExternalJob{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       kind,
+				APIVersion: apiVersion,
+			},
+		}
+	default:
+		// return conversionResponseFailureWithMessagef("unknown desired version")
+	}
+	return targetObj
 }
 
 // conversionResponseFailureWithMessagef is a helper function to create an AdmissionResponse
@@ -303,4 +293,91 @@ func statusSucceed() metav1.Status {
 	return metav1.Status{
 		Status: metav1.StatusSuccess,
 	}
+}
+
+func isHub(obj runtime.Object) bool {
+	_, yes := obj.(conversion.Hub)
+	return yes
+}
+
+func isConvertable(obj runtime.Object) bool {
+	_, yes := obj.(conversion.Convertable)
+	return yes
+}
+
+func convert(myscheme *runtime.Scheme, a, b runtime.Object) error {
+	// check if a and b are of same type, then just do deepCopy ?
+
+	// TODO(droot): figure out a less verbose version of this check
+	if a.GetObjectKind().GroupVersionKind().String() == b.GetObjectKind().GroupVersionKind().String() {
+		// maybe, we should just use deepcopy here ?
+		return fmt.Errorf("conversion is not allowed between same type %T", a)
+	}
+
+	aIsHub, bIsHub := isHub(a), isHub(b)
+	aIsConvertable, bIsConvertable := isConvertable(a), isConvertable(b)
+
+	if aIsHub {
+		if bIsConvertable {
+			return b.(conversion.Convertable).ConvertFrom(a)
+		} else {
+			// this is error case ?
+			return fmt.Errorf("%T is not convertable to", a)
+		}
+	}
+
+	if bIsHub {
+		if aIsConvertable {
+			return a.(conversion.Convertable).ConvertTo(b)
+		} else {
+			return fmt.Errorf("%T is not convertable", a)
+		}
+	}
+
+	// neigher a nor b are Hub, means both of them are spoke, so lets get the hub
+	// version type.
+	hub, err := getHub(myscheme, a)
+	if err != nil {
+		return err
+	}
+	// shall we get Hub for b type as well and ensure hubs are same ?
+
+	// a and b needs to be convertable for it to work
+	if !aIsConvertable || !bIsConvertable {
+		return fmt.Errorf("%T and %T needs to be both convertable", a, b)
+	}
+
+	err = a.(conversion.Convertable).ConvertTo(hub)
+	if err != nil {
+		return fmt.Errorf("%T failed to convert to hub version %T : %v", a, hub, err)
+	}
+
+	err = b.(conversion.Convertable).ConvertFrom(hub)
+	if err != nil {
+		return fmt.Errorf("%T failed to convert from hub version %T : %v", b, hub, err)
+	}
+
+	return nil
+}
+
+func getHub(myscheme *runtime.Scheme, obj runtime.Object) (runtime.Object, error) {
+	gvks, _, err := myscheme.ObjectKinds(obj)
+	if err != nil {
+		return nil, fmt.Errorf("error retriving object kinds for given object : %v", err)
+	}
+
+	var hub runtime.Object
+	hubFoundAlready := false
+	for _, gvk := range gvks {
+		o, _ := myscheme.New(gvk)
+		if _, IsHub := o.(conversion.Hub); IsHub {
+			if hubFoundAlready {
+				// multiple hub found, error case
+				return nil, fmt.Errorf("multiple hub version defined")
+			}
+			hubFoundAlready = true
+			hub = o
+		}
+	}
+	return hub, nil
 }

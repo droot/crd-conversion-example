@@ -30,6 +30,7 @@ import (
 type ExternalJobSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	RunAt string `json:"runAt"`
 }
 
 // ExternalJobStatus defines the observed state of ExternalJob
@@ -67,11 +68,13 @@ func init() {
 func (ej *ExternalJob) convertToV2ExternalJob(jobV2 *v2.ExternalJob) error {
 	//TODO(droot): figure out how to make it easy
 	jobV2.ObjectMeta = ej.ObjectMeta
+	jobV2.Spec.ScheduleAt = ej.Spec.RunAt
 	return nil
 }
 
 func (ej *ExternalJob) convertFromV2ExternalJob(jobv2 *v2.ExternalJob) error {
 	ej.ObjectMeta = jobv2.ObjectMeta
+	ej.Spec.RunAt = jobv2.Spec.ScheduleAt
 	return nil
 }
 
@@ -98,6 +101,3 @@ func (ej *ExternalJob) ConvertFrom(src runtime.Object) error {
 		return fmt.Errorf("unsupported type %v", t)
 	}
 }
-
-// Make it a Hub ?
-// func (ej *ExternalJob) Hub() {}
