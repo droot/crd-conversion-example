@@ -61,4 +61,9 @@ func init() {
 	SchemeBuilder.Register(&ExternalJob{}, &ExternalJobList{})
 }
 
+// v2.ExternalJob is the storage version so mark this as Hub
+// Storage version doesn't need to implement any conversion methods because
+// default conversionHandler implements conversion logic for storage version.
+// Adding comment annotation here to mark it as storage version
+
 func (ej *ExternalJob) Hub() {}

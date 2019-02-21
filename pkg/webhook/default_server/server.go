@@ -121,13 +121,12 @@ func Add(mgr manager.Manager) error {
 		_, _, err := serializer.Decode(body, nil, &convertReview)
 		if err != nil {
 			log.Error(err, "error decoding conversion request")
-			// TODO(droot): define helper for returning conversion error
-			// response
+			// TODO(droot): define helper for returning conversion error response
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		convertReview.Response = doConversion(serializer, mgr.GetScheme(), convertReview.Request)
+		convertReview.Response = handleConvertRequest(serializer, mgr.GetScheme(), convertReview.Request)
 		convertReview.Response.UID = convertReview.Request.UID
 
 		err = serializer.Encode(&convertReview, w)
@@ -143,31 +142,29 @@ func Add(mgr manager.Manager) error {
 	return svr.Register(webhooks...)
 }
 
-// doConversion converts the requested object given the conversion function and returns a conversion response.
-// failures will be reported as Reason in the conversion response.
-func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *apix.ConversionRequest) *apix.ConversionResponse {
+// handles a version conversion request.
+func handleConvertRequest(ser *json.Serializer, scheme *runtime.Scheme, req *apix.ConversionRequest) *apix.ConversionResponse {
 	var convertedObjects []runtime.RawExtension
 
 	var conversionCodecs = serializer.NewCodecFactory(scheme)
-	for _, obj := range convertRequest.Objects {
-		log.Info("decoding object", "object", obj)
-		a, gvk, err := conversionCodecs.UniversalDeserializer().Decode(obj.Raw, nil, nil)
+	for _, obj := range req.Objects {
+		src, gvk, err := conversionCodecs.UniversalDeserializer().Decode(obj.Raw, nil, nil)
 		if err != nil {
-			log.Error(err, "error decoding to v1 obj")
+			log.Error(err, "error decoding src object")
 		}
-		log.Info("decoding incoming obj", "a", a, "b", gvk, "a-type", fmt.Sprintf("%T", a))
+		log.Info("decoding incoming obj", "src", src, "gvk", gvk, "src type", fmt.Sprintf("%T", src))
 
-		targetObj, err := getTargetObject(scheme, convertRequest.DesiredAPIVersion, gvk.Kind)
+		dst, err := getTargetObject(scheme, req.DesiredAPIVersion, gvk.Kind)
+		if err != nil {
+			log.Error(err, "error getting destination object")
+			return conversionResponseFailureWithMessagef("error converting object")
+		}
+		err = convertObject(scheme, src, dst)
 		if err != nil {
 			log.Error(err, "error converting object")
 			return conversionResponseFailureWithMessagef("error converting object")
 		}
-		err = convert(scheme, a, targetObj)
-		if err != nil {
-			log.Error(err, "error converting object")
-			return conversionResponseFailureWithMessagef("error converting object")
-		}
-		convertedObjects = append(convertedObjects, runtime.RawExtension{Object: targetObj})
+		convertedObjects = append(convertedObjects, runtime.RawExtension{Object: dst})
 	}
 	return &apix.ConversionResponse{
 		ConvertedObjects: convertedObjects,
@@ -175,10 +172,85 @@ func doConversion(ser *json.Serializer, scheme *runtime.Scheme, convertRequest *
 	}
 }
 
-func getTargetObject(myscheme *runtime.Scheme, apiVersion, kind string) (runtime.Object, error) {
+func convertObject(scheme *runtime.Scheme, src, dst runtime.Object) error {
+	// TODO(droot): figure out a less verbose version of this check
+	if src.GetObjectKind().GroupVersionKind().String() == dst.GetObjectKind().GroupVersionKind().String() {
+		return fmt.Errorf("conversion is not allowed between same type %T", src)
+	}
+
+	srcIsHub, dstIsHub := isHub(src), isHub(dst)
+	srcIsConvertable, dstIsConvertable := isConvertable(src), isConvertable(dst)
+
+	if srcIsHub {
+		if dstIsConvertable {
+			return dst.(conversion.Convertable).ConvertFrom(src.(conversion.Hub))
+		} else {
+			// this is error case, this can be flagged at setup time ?
+			return fmt.Errorf("%T is not convertable to", src)
+		}
+	}
+
+	if dstIsHub {
+		if srcIsConvertable {
+			return src.(conversion.Convertable).ConvertTo(dst.(conversion.Hub))
+		} else {
+			// this is error case.
+			return fmt.Errorf("%T is not convertable", src)
+		}
+	}
+
+	// neigher src nor dst are Hub, means both of them are spoke, so lets get the hub
+	// version type.
+	hub, err := getHub(scheme, src)
+	if err != nil {
+		return err
+	}
+	// shall we get Hub for dst type as well and ensure hubs are same ?
+
+	// src and dst needs to be convertable for it to work
+	if !srcIsConvertable || !dstIsConvertable {
+		return fmt.Errorf("%T and %T needs to be both convertable", src, dst)
+	}
+
+	err = src.(conversion.Convertable).ConvertTo(hub)
+	if err != nil {
+		return fmt.Errorf("%T failed to convert to hub version %T : %v", src, hub, err)
+	}
+
+	err = dst.(conversion.Convertable).ConvertFrom(hub)
+	if err != nil {
+		return fmt.Errorf("%T failed to convert from hub version %T : %v", dst, hub, err)
+	}
+
+	return nil
+}
+
+func getHub(scheme *runtime.Scheme, obj runtime.Object) (conversion.Hub, error) {
+	gvks, _, err := scheme.ObjectKinds(obj)
+	if err != nil {
+		return nil, fmt.Errorf("error retriving object kinds for given object : %v", err)
+	}
+
+	var hub conversion.Hub
+	hubFoundAlready := false
+	var isHub bool
+	for _, gvk := range gvks {
+		o, _ := scheme.New(gvk)
+		if hub, isHub = o.(conversion.Hub); isHub {
+			if hubFoundAlready {
+				// multiple hub found, error case
+				return nil, fmt.Errorf("multiple hub version defined")
+			}
+			hubFoundAlready = true
+		}
+	}
+	return hub, nil
+}
+
+func getTargetObject(scheme *runtime.Scheme, apiVersion, kind string) (runtime.Object, error) {
 	gvk := schema.FromAPIVersionAndKind(apiVersion, kind)
 
-	obj, err := myscheme.New(gvk)
+	obj, err := scheme.New(gvk)
 	if err != nil {
 		return obj, err
 	}
@@ -227,81 +299,4 @@ func isHub(obj runtime.Object) bool {
 func isConvertable(obj runtime.Object) bool {
 	_, yes := obj.(conversion.Convertable)
 	return yes
-}
-
-func convert(myscheme *runtime.Scheme, a, b runtime.Object) error {
-	// check if a and b are of same type, then just do deepCopy ?
-
-	// TODO(droot): figure out a less verbose version of this check
-	if a.GetObjectKind().GroupVersionKind().String() == b.GetObjectKind().GroupVersionKind().String() {
-		// maybe, we should just use deepcopy here ?
-		return fmt.Errorf("conversion is not allowed between same type %T", a)
-	}
-
-	aIsHub, bIsHub := isHub(a), isHub(b)
-	aIsConvertable, bIsConvertable := isConvertable(a), isConvertable(b)
-
-	if aIsHub {
-		if bIsConvertable {
-			return b.(conversion.Convertable).ConvertFrom(a)
-		} else {
-			// this is error case ?
-			return fmt.Errorf("%T is not convertable to", a)
-		}
-	}
-
-	if bIsHub {
-		if aIsConvertable {
-			return a.(conversion.Convertable).ConvertTo(b)
-		} else {
-			return fmt.Errorf("%T is not convertable", a)
-		}
-	}
-
-	// neigher a nor b are Hub, means both of them are spoke, so lets get the hub
-	// version type.
-	hub, err := getHub(myscheme, a)
-	if err != nil {
-		return err
-	}
-	// shall we get Hub for b type as well and ensure hubs are same ?
-
-	// a and b needs to be convertable for it to work
-	if !aIsConvertable || !bIsConvertable {
-		return fmt.Errorf("%T and %T needs to be both convertable", a, b)
-	}
-
-	err = a.(conversion.Convertable).ConvertTo(hub)
-	if err != nil {
-		return fmt.Errorf("%T failed to convert to hub version %T : %v", a, hub, err)
-	}
-
-	err = b.(conversion.Convertable).ConvertFrom(hub)
-	if err != nil {
-		return fmt.Errorf("%T failed to convert from hub version %T : %v", b, hub, err)
-	}
-
-	return nil
-}
-
-func getHub(myscheme *runtime.Scheme, obj runtime.Object) (runtime.Object, error) {
-	gvks, _, err := myscheme.ObjectKinds(obj)
-	if err != nil {
-		return nil, fmt.Errorf("error retriving object kinds for given object : %v", err)
-	}
-
-	var hub runtime.Object
-	hubFoundAlready := false
-	for _, gvk := range gvks {
-		o, _ := myscheme.New(gvk)
-		if _, IsHub := o.(conversion.Hub); IsHub {
-			if hubFoundAlready {
-				// multiple hub found, error case
-				return nil, fmt.Errorf("multiple hub version defined")
-			}
-			hubFoundAlready = true
-			hub = o
-		}
-	}
-	return hub, nil
 }

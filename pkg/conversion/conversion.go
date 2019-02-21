@@ -2,13 +2,17 @@ package conversion
 
 import "k8s.io/apimachinery/pkg/runtime"
 
-// Convertable defines the roundtrip capability between Hub/Spoke.
+// A versioned type is convertable if it can be converted to/from a hub type.
 type Convertable interface {
-	ConvertTo(dst runtime.Object) error
-	ConvertFrom(src runtime.Object) error
+	runtime.Object
+	ConvertTo(dst Hub) error
+	ConvertFrom(src Hub) error
 }
 
-// Hub defines capability to indicate whether a GVK is a Hub or not ?
+// Hub defines capability to indicate whether a versioned type is a Hub or not.
+// Default conversion handler will use this interface to implement spoke to
+// spoke conversion.
 type Hub interface {
+	runtime.Object
 	Hub()
 }

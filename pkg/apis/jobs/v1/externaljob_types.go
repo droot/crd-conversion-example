@@ -19,8 +19,8 @@ import (
 	"fmt"
 
 	"github.com/droot/crd-conversion-example/pkg/apis/jobs/v2"
+	"github.com/droot/crd-conversion-example/pkg/conversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -65,37 +65,31 @@ func init() {
 	SchemeBuilder.Register(&ExternalJob{}, &ExternalJobList{})
 }
 
-func (ej *ExternalJob) convertToV2ExternalJob(jobV2 *v2.ExternalJob) error {
-	//TODO(droot): figure out how to make it easy
-	jobV2.ObjectMeta = ej.ObjectMeta
-	jobV2.Spec.ScheduleAt = ej.Spec.RunAt
-	return nil
-}
+// since v1.ExternalJob is a spoke, it needs to be convertable.
+// It needs to implement convert to/from storage version
+// TODO(droot): evaluate advantages of taking `conversion.Hub` as input to
+// converter methods. One downside of that approach is if we don't want to
+// use Hub interface to indicate storage/hub type, then taking Hub as input
+// is not a good idea. So keeping it open.
 
-func (ej *ExternalJob) convertFromV2ExternalJob(jobv2 *v2.ExternalJob) error {
-	ej.ObjectMeta = jobv2.ObjectMeta
-	ej.Spec.RunAt = jobv2.Spec.ScheduleAt
-	return nil
-}
-
-func (ej *ExternalJob) ConvertTo(dst runtime.Object) error {
+func (ej *ExternalJob) ConvertTo(dst conversion.Hub) error {
 	switch t := dst.(type) {
 	case *v2.ExternalJob:
-		return ej.convertToV2ExternalJob(dst.(*v2.ExternalJob))
-	case *ExternalJob:
-		ej.DeepCopyInto(dst.(*ExternalJob))
+		jobv2 := dst.(*v2.ExternalJob)
+		jobv2.ObjectMeta = ej.ObjectMeta
+		jobv2.Spec.ScheduleAt = ej.Spec.RunAt
 		return nil
 	default:
 		return fmt.Errorf("unsupported type %v", t)
 	}
 }
 
-func (ej *ExternalJob) ConvertFrom(src runtime.Object) error {
+func (ej *ExternalJob) ConvertFrom(src conversion.Hub) error {
 	switch t := src.(type) {
 	case *v2.ExternalJob:
-		return ej.convertFromV2ExternalJob(src.(*v2.ExternalJob))
-	case *ExternalJob:
-		src.(*ExternalJob).DeepCopyInto(ej)
+		jobv2 := src.(*v2.ExternalJob)
+		ej.ObjectMeta = jobv2.ObjectMeta
+		ej.Spec.RunAt = jobv2.Spec.ScheduleAt
 		return nil
 	default:
 		return fmt.Errorf("unsupported type %v", t)
