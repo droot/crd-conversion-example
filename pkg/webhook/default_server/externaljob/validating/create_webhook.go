@@ -15,22 +15,16 @@ limitations under the License.
 
 package validating
 
-import (
-	jobsv1 "github.com/droot/crd-conversion-example/pkg/apis/jobs/v1"
-	admissionregistrationv1beta1 "k8s.io/api/admissionregistration/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission/builder"
-)
-
 // +kubebuilder:webhook:groups=jobs,resources=externaljobs,verbs=CREATE
 // +kubebuilder:webhook:name=bar-webhook,path=/convert,type=validating,failure-policy=Fail
 func init() {
-	builderName := "validating-create-externaljob"
-	Builders[builderName] = builder.
-		NewWebhookBuilder().
-		Name(builderName + ".example.org").
-		Path("/" + builderName).
-		Validating().
-		Operations(admissionregistrationv1beta1.Create).
-		FailurePolicy(admissionregistrationv1beta1.Fail).
-		ForType(&jobsv1.ExternalJob{})
+	// builderName := "validating-create-externaljob"
+	// Builders[builderName] = builder.
+	// 	NewWebhookBuilder().
+	// 	Name(builderName + ".example.org").
+	// 	Path("/" + builderName).
+	// 	Validating().
+	// 	Operations(admissionregistrationv1beta1.Create).
+	// 	FailurePolicy(admissionregistrationv1beta1.Fail).
+	// 	ForType(&jobsv1.ExternalJob{})
 }

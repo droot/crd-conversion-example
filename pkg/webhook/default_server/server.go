@@ -34,17 +34,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission/builder"
 
 	apix "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 )
 
 var (
-	log        = logf.Log.WithName("default_server")
-	builderMap = map[string]*builder.WebhookBuilder{}
+	log = logf.Log.WithName("default_server")
+	// builderMap = map[string]*builder.WebhookBuilder{}
 	// HandlerMap contains all admission webhook handlers.
-	HandlerMap = map[string][]admission.Handler{}
+	// HandlerMap = map[string][]admission.Handler{}
 )
 
 // Add adds itself to the manager
@@ -90,21 +88,21 @@ func Add(mgr manager.Manager) error {
 	}
 
 	var webhooks []webhook.Webhook
-	for k, builder := range builderMap {
-		handlers, ok := HandlerMap[k]
-		if !ok {
-			log.V(1).Info(fmt.Sprintf("can't find handlers for builder: %v", k))
-			handlers = []admission.Handler{}
-		}
-		wh, err := builder.
-			Handlers(handlers...).
-			WithManager(mgr).
-			Build()
-		if err != nil {
-			return err
-		}
-		webhooks = append(webhooks, wh)
-	}
+	// for k, builder := range builderMap {
+	// 	handlers, ok := HandlerMap[k]
+	// 	if !ok {
+	// 		log.V(1).Info(fmt.Sprintf("can't find handlers for builder: %v", k))
+	// 		handlers = []admission.Handler{}
+	// 	}
+	// 	wh, err := builder.
+	// 		Handlers(handlers...).
+	// 		WithManager(mgr).
+	// 		Build()
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	webhooks = append(webhooks, wh)
+	// }
 
 	svr.HandleFunc("/convert", func(w http.ResponseWriter, r *http.Request) {
 		log.Info("got a convert request")
