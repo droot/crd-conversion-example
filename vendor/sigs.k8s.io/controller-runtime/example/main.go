@@ -20,20 +20,18 @@ import (
 	"flag"
 	"os"
 
-	admissionregistrationv1beta1 "k8s.io/api/admissionregistration/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apitypes "k8s.io/apimachinery/pkg/types"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
-	"sigs.k8s.io/controller-runtime/pkg/runtime/signals"
+	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission/builder"
 )
 
 var log = logf.Log.WithName("example-controller")
@@ -44,7 +42,7 @@ func main() {
 		"disable the installer in the webhook server, so it won't install webhook configuration resources during bootstrapping")
 
 	flag.Parse()
-	logf.SetLogger(logf.ZapLogger(false))
+	logf.SetLogger(zap.Logger(false))
 	entryLog := log.WithName("entrypoint")
 
 	// Setup a Manager
@@ -79,65 +77,19 @@ func main() {
 	}
 
 	// Setup webhooks
-	entryLog.Info("setting up webhooks")
-	mutatingWebhook, err := builder.NewWebhookBuilder().
-		Name("mutating.k8s.io").
-		Mutating().
-		Operations(admissionregistrationv1beta1.Create, admissionregistrationv1beta1.Update).
-		WithManager(mgr).
-		ForType(&corev1.Pod{}).
-		Handlers(&podAnnotator{}).
-		Build()
-	if err != nil {
-		entryLog.Error(err, "unable to setup mutating webhook")
-		os.Exit(1)
-	}
-
-	validatingWebhook, err := builder.NewWebhookBuilder().
-		Name("validating.k8s.io").
-		Validating().
-		Operations(admissionregistrationv1beta1.Create, admissionregistrationv1beta1.Update).
-		WithManager(mgr).
-		ForType(&corev1.Pod{}).
-		Handlers(&podValidator{}).
-		Build()
-	if err != nil {
-		entryLog.Error(err, "unable to setup validating webhook")
-		os.Exit(1)
-	}
-
 	entryLog.Info("setting up webhook server")
-	as, err := webhook.NewServer("foo-admission-server", mgr, webhook.ServerOptions{
-		Port:                          9876,
-		CertDir:                       "/tmp/cert",
-		DisableWebhookConfigInstaller: &disableWebhookConfigInstaller,
-		BootstrapOptions: &webhook.BootstrapOptions{
-			Secret: &apitypes.NamespacedName{
-				Namespace: "default",
-				Name:      "foo-admission-server-secret",
-			},
-
-			Service: &webhook.Service{
-				Namespace: "default",
-				Name:      "foo-admission-server-service",
-				// Selectors should select the pods that runs this webhook server.
-				Selectors: map[string]string{
-					"app": "foo-admission-server",
-				},
-			},
-		},
-	})
-	if err != nil {
-		entryLog.Error(err, "unable to create a new webhook server")
+	hookServer := &webhook.Server{
+		Port:    9876,
+		CertDir: "/tmp/cert",
+	}
+	if err := mgr.Add(hookServer); err != nil {
+		entryLog.Error(err, "unable register webhook server with manager")
 		os.Exit(1)
 	}
 
 	entryLog.Info("registering webhooks to the webhook server")
-	err = as.Register(mutatingWebhook, validatingWebhook)
-	if err != nil {
-		entryLog.Error(err, "unable to register webhooks in the admission server")
-		os.Exit(1)
-	}
+	hookServer.Register("/mutate-pods", &webhook.Admission{Handler: &podAnnotator{}})
+	hookServer.Register("/validate-pods", &webhook.Admission{Handler: &podValidator{}})
 
 	entryLog.Info("starting manager")
 	if err := mgr.Start(signals.SetupSignalHandler()); err != nil {

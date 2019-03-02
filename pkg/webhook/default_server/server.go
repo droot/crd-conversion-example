@@ -30,7 +30,6 @@ import (
 
 	"github.com/droot/crd-conversion-example/pkg/conversion"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -56,38 +55,41 @@ func Add(mgr manager.Manager) error {
 		secretName = "webhook-server-secret"
 	}
 
-	disableInstaller := true
+	// disableInstaller := true
 
 	// +kubebuilder:webhook:port=9876,cert-dir=/tmp/cert
 	// +kubebuilder:webhook:service=crd-cc-system:crd-cc-webhook-service,selector=control-plane:controller-manager
 	// +kubebuilder:webhook:secret=system:webhook-server-secret
 	// +kubebuilder:webhook:validating-webhook-config-name=test-mutating-webhook-cfg,validating-webhook-config-name=test-validating-webhook-cfg
-	svr, err := webhook.NewServer("foo-admission-server", mgr, webhook.ServerOptions{
-		// TODO(user): change the configuration of ServerOptions based on your need.
-		Port:                          9876,
-		CertDir:                       "/tmp/cert",
-		DisableWebhookConfigInstaller: &disableInstaller,
-		BootstrapOptions: &webhook.BootstrapOptions{
-			Secret: &types.NamespacedName{
-				Namespace: ns,
-				Name:      secretName,
-			},
+	svr := &webhook.Server{
+		Port:    9876,
+		CertDir: "/tmp/cert",
+	}
+	// ("foo-admission-server", mgr, webhook.ServerOptions{
+	// 	// TODO(user): change the configuration of ServerOptions based on your need.
+	// 	DisableWebhookConfigInstaller: &disableInstaller,
+	// 	BootstrapOptions: &webhook.BootstrapOptions{
+	// 		Secret: &types.NamespacedName{
+	// 			Namespace: ns,
+	// 			Name:      secretName,
+	// 		},
+	//
+	// 		Service: &webhook.Service{
+	// 			Namespace: ns,
+	// 			Name:      "crd-cc-webhook-service",
+	// 			// Selectors should select the pods that runs this webhook server.
+	// 			Selectors: map[string]string{
+	// 				"control-plane": "controller-manager",
+	// 			},
+	// 		},
+	// 	},
+	// })
 
-			Service: &webhook.Service{
-				Namespace: ns,
-				Name:      "crd-cc-webhook-service",
-				// Selectors should select the pods that runs this webhook server.
-				Selectors: map[string]string{
-					"control-plane": "controller-manager",
-				},
-			},
-		},
-	})
-	if err != nil {
+	if err := mgr.Add(svr); err != nil {
 		return err
 	}
 
-	var webhooks []webhook.Webhook
+	// var webhooks []webhook.Webhook
 	// for k, builder := range builderMap {
 	// 	handlers, ok := HandlerMap[k]
 	// 	if !ok {
@@ -104,7 +106,7 @@ func Add(mgr manager.Manager) error {
 	// 	webhooks = append(webhooks, wh)
 	// }
 
-	svr.HandleFunc("/convert", func(w http.ResponseWriter, r *http.Request) {
+	svr.RegisterFunc("/convert", func(w http.ResponseWriter, r *http.Request) {
 		log.Info("got a convert request")
 
 		var body []byte
@@ -137,7 +139,8 @@ func Add(mgr manager.Manager) error {
 		}
 	})
 
-	return svr.Register(webhooks...)
+	// return svr.Register()
+	return nil
 }
 
 // handles a version conversion request.
