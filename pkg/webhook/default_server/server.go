@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"os"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -39,108 +38,63 @@ import (
 
 var (
 	log = logf.Log.WithName("default_server")
-	// builderMap = map[string]*builder.WebhookBuilder{}
-	// HandlerMap contains all admission webhook handlers.
-	// HandlerMap = map[string][]admission.Handler{}
 )
 
 // Add adds itself to the manager
 func Add(mgr manager.Manager) error {
-	ns := os.Getenv("POD_NAMESPACE")
-	if len(ns) == 0 {
-		ns = "default"
-	}
-	secretName := os.Getenv("SECRET_NAME")
-	if len(secretName) == 0 {
-		secretName = "webhook-server-secret"
-	}
-
-	// disableInstaller := true
-
-	// +kubebuilder:webhook:port=9876,cert-dir=/tmp/cert
-	// +kubebuilder:webhook:service=crd-cc-system:crd-cc-webhook-service,selector=control-plane:controller-manager
-	// +kubebuilder:webhook:secret=system:webhook-server-secret
-	// +kubebuilder:webhook:validating-webhook-config-name=test-mutating-webhook-cfg,validating-webhook-config-name=test-validating-webhook-cfg
 	svr := &webhook.Server{
 		Port:    9876,
 		CertDir: "/tmp/cert",
 	}
-	// ("foo-admission-server", mgr, webhook.ServerOptions{
-	// 	// TODO(user): change the configuration of ServerOptions based on your need.
-	// 	DisableWebhookConfigInstaller: &disableInstaller,
-	// 	BootstrapOptions: &webhook.BootstrapOptions{
-	// 		Secret: &types.NamespacedName{
-	// 			Namespace: ns,
-	// 			Name:      secretName,
-	// 		},
-	//
-	// 		Service: &webhook.Service{
-	// 			Namespace: ns,
-	// 			Name:      "crd-cc-webhook-service",
-	// 			// Selectors should select the pods that runs this webhook server.
-	// 			Selectors: map[string]string{
-	// 				"control-plane": "controller-manager",
-	// 			},
-	// 		},
-	// 	},
-	// })
-
 	if err := mgr.Add(svr); err != nil {
 		return err
 	}
 
-	// var webhooks []webhook.Webhook
-	// for k, builder := range builderMap {
-	// 	handlers, ok := HandlerMap[k]
-	// 	if !ok {
-	// 		log.V(1).Info(fmt.Sprintf("can't find handlers for builder: %v", k))
-	// 		handlers = []admission.Handler{}
-	// 	}
-	// 	wh, err := builder.
-	// 		Handlers(handlers...).
-	// 		WithManager(mgr).
-	// 		Build()
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	webhooks = append(webhooks, wh)
-	// }
+	cb := &conversionHandler{
+		scheme: mgr.GetScheme(),
+	}
 
-	svr.RegisterFunc("/convert", func(w http.ResponseWriter, r *http.Request) {
-		log.Info("got a convert request")
+	svr.Register("/convert", cb)
 
-		var body []byte
-		if r.Body != nil {
-			if data, err := ioutil.ReadAll(r.Body); err == nil {
-				body = data
-			}
-		}
-		convertReview := apix.ConversionReview{}
-
-		serializer := json.NewSerializer(json.DefaultMetaFactory, mgr.GetScheme(), mgr.GetScheme(), false)
-		_, _, err := serializer.Decode(body, nil, &convertReview)
-		if err != nil {
-			log.Error(err, "error decoding conversion request")
-			// TODO(droot): define helper for returning conversion error response
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		convertReview.Response = handleConvertRequest(serializer, mgr.GetScheme(), convertReview.Request)
-		convertReview.Response.UID = convertReview.Request.UID
-
-		err = serializer.Encode(&convertReview, w)
-		if err != nil {
-			log.Error(err, "error encoding conversion request")
-			// TODO(droot): define helper for returning conversion error
-			// response
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-	})
-
-	// return svr.Register()
 	return nil
+}
+
+type conversionHandler struct {
+	scheme *runtime.Scheme
+}
+
+func (cb *conversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+
+	log.Info("got a convert request")
+
+	var body []byte
+	if r.Body != nil {
+		if data, err := ioutil.ReadAll(r.Body); err == nil {
+			body = data
+		}
+	}
+	convertReview := apix.ConversionReview{}
+
+	serializer := json.NewSerializer(json.DefaultMetaFactory, cb.scheme, cb.scheme, false)
+	_, _, err := serializer.Decode(body, nil, &convertReview)
+	if err != nil {
+		log.Error(err, "error decoding conversion request")
+		// TODO(droot): define helper for returning conversion error response
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	convertReview.Response = handleConvertRequest(serializer, cb.scheme, convertReview.Request)
+	convertReview.Response.UID = convertReview.Request.UID
+
+	err = serializer.Encode(&convertReview, w)
+	if err != nil {
+		log.Error(err, "error encoding conversion request")
+		// TODO(droot): define helper for returning conversion error
+		// response
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 }
 
 // handles a version conversion request.

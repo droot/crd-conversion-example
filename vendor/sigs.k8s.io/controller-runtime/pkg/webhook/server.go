@@ -95,18 +95,6 @@ func (s *Server) Register(path string, hook http.Handler) {
 	s.webhookMux.Handle(path, instrumentedHook(path, hook))
 }
 
-func (s *Server) RegisterFunc(path string, hook http.HandlerFunc) {
-	s.defaultingOnce.Do(s.setDefaults)
-	_, found := s.webhooks[path]
-	if found {
-		panic(fmt.Errorf("can't register duplicate path: %v", path))
-	}
-	// TODO(directxman12): call setfields if we've already started the server
-	// s.webhooks[path] = hook
-	// s.webhookMux.Handle(path, instrumentedHook(path, hook))
-	s.webhookMux.HandleFunc(path, hook)
-}
-
 // instrumentedHook adds some instrumentation on top of the given webhook.
 func instrumentedHook(path string, hookRaw http.Handler) http.Handler {
 	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
