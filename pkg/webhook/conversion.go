@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"sync"
 
 	"github.com/droot/crd-conversion-example/pkg/conversion"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 
 	apix "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -24,15 +24,28 @@ var (
 type ConversionHandler struct {
 	Scheme *runtime.Scheme
 
+	serializer runtime.Serializer
 	// decoder
 	// TODO(droot): make scheme and decoder injectable
+
+	once sync.Once
+}
+
+func (cb *ConversionHandler) setDefaults() {
+	cb.once.Do(func() {
+		if cb.Scheme == nil {
+			cb.Scheme = runtime.NewScheme()
+		}
+		cb.serializer = json.NewSerializer(json.DefaultMetaFactory, cb.Scheme, cb.Scheme, false)
+		// conversionCodecs := serializer.NewCodecFactory(cb.Scheme)
+	})
 }
 
 // ensure ConversionHandler implements http.Handler
 var _ http.Handler = &ConversionHandler{}
 
 func (cb *ConversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
+	cb.setDefaults()
 	log.Info("got a convert request")
 
 	var body []byte
@@ -43,8 +56,8 @@ func (cb *ConversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	convertReview := apix.ConversionReview{}
 
-	serializer := json.NewSerializer(json.DefaultMetaFactory, cb.Scheme, cb.Scheme, false)
-	_, _, err := serializer.Decode(body, nil, &convertReview)
+	// serializer := json.NewSerializer(json.DefaultMetaFactory, cb.Scheme, cb.Scheme, false)
+	_, _, err := cb.serializer.Decode(body, nil, &convertReview)
 	if err != nil {
 		log.Error(err, "error decoding conversion request")
 		// TODO(droot): define helper for returning conversion error response
@@ -52,10 +65,10 @@ func (cb *ConversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	convertReview.Response = handleConvertRequest(serializer, cb.Scheme, convertReview.Request)
+	convertReview.Response = cb.handleConvertRequest(convertReview.Request)
 	convertReview.Response.UID = convertReview.Request.UID
 
-	err = serializer.Encode(&convertReview, w)
+	err = cb.serializer.Encode(&convertReview, w)
 	if err != nil {
 		log.Error(err, "error encoding conversion request")
 		// TODO(droot): define helper for returning conversion error
@@ -66,23 +79,23 @@ func (cb *ConversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // handles a version conversion request.
-func handleConvertRequest(ser *json.Serializer, scheme *runtime.Scheme, req *apix.ConversionRequest) *apix.ConversionResponse {
+func (cb *ConversionHandler) handleConvertRequest(req *apix.ConversionRequest) *apix.ConversionResponse {
 	var convertedObjects []runtime.RawExtension
 
-	var conversionCodecs = serializer.NewCodecFactory(scheme)
 	for _, obj := range req.Objects {
-		src, gvk, err := conversionCodecs.UniversalDeserializer().Decode(obj.Raw, nil, nil)
+		// src, gvk, err := cb.conversionCodecs.UniversalDeserializer().Decode(obj.Raw, nil, nil)
+		src, gvk, err := cb.serializer.Decode(obj.Raw, nil, nil)
 		if err != nil {
 			log.Error(err, "error decoding src object")
 		}
 		log.Info("decoding incoming obj", "src", src, "gvk", gvk, "src type", fmt.Sprintf("%T", src))
 
-		dst, err := getTargetObject(scheme, req.DesiredAPIVersion, gvk.Kind)
+		dst, err := getTargetObject(cb.Scheme, req.DesiredAPIVersion, gvk.Kind)
 		if err != nil {
 			log.Error(err, "error getting destination object")
 			return conversionResponseFailureWithMessagef("error converting object")
 		}
-		err = convertObject(scheme, src, dst)
+		err = cb.convertObject(src, dst)
 		if err != nil {
 			log.Error(err, "error converting object")
 			return conversionResponseFailureWithMessagef("error converting object")
@@ -95,7 +108,7 @@ func handleConvertRequest(ser *json.Serializer, scheme *runtime.Scheme, req *api
 	}
 }
 
-func convertObject(scheme *runtime.Scheme, src, dst runtime.Object) error {
+func (cb *ConversionHandler) convertObject(src, dst runtime.Object) error {
 	// TODO(droot): figure out a less verbose version of this check
 	if src.GetObjectKind().GroupVersionKind().String() == dst.GetObjectKind().GroupVersionKind().String() {
 		return fmt.Errorf("conversion is not allowed between same type %T", src)
@@ -124,7 +137,7 @@ func convertObject(scheme *runtime.Scheme, src, dst runtime.Object) error {
 
 	// neigher src nor dst are Hub, means both of them are spoke, so lets get the hub
 	// version type.
-	hub, err := getHub(scheme, src)
+	hub, err := getHub(cb.Scheme, src)
 	if err != nil {
 		return err
 	}
