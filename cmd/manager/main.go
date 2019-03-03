@@ -21,12 +21,13 @@ import (
 
 	"github.com/droot/crd-conversion-example/pkg/apis"
 	"github.com/droot/crd-conversion-example/pkg/controller"
-	"github.com/droot/crd-conversion-example/pkg/webhook"
+	conversionwb "github.com/droot/crd-conversion-example/pkg/webhook"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"sigs.k8s.io/controller-runtime/pkg/runtime/signals"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
 
 func main() {
@@ -68,11 +69,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Info("setting up webhooks")
-	if err := webhook.AddToManager(mgr); err != nil {
-		log.Error(err, "unable to register webhooks to the manager")
+	hookServer := &webhook.Server{
+		Port:    9876,
+		CertDir: "/tmp/cert",
+	}
+	if err := mgr.Add(hookServer); err != nil {
+		log.Error(err, "unable to setup hook server")
 		os.Exit(1)
 	}
+
+	cb := &conversionwb.ConversionHandler{Scheme: mgr.GetScheme()}
+
+	hookServer.Register("/convert", cb)
 
 	// Start the Cmd
 	log.Info("Starting the Cmd.")

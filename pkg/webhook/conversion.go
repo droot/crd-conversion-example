@@ -1,69 +1,37 @@
-/*
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
-package defaultserver
+package webhook
 
 import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
 
+	"github.com/droot/crd-conversion-example/pkg/conversion"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/droot/crd-conversion-example/pkg/conversion"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
-
 	apix "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 var (
-	log = logf.Log.WithName("default_server")
+	log = logf.Log.WithName("conversion_webhook")
 )
 
-// Add adds itself to the manager
-func Add(mgr manager.Manager) error {
-	svr := &webhook.Server{
-		Port:    9876,
-		CertDir: "/tmp/cert",
-	}
-	if err := mgr.Add(svr); err != nil {
-		return err
-	}
+type ConversionHandler struct {
+	Scheme *runtime.Scheme
 
-	cb := &conversionHandler{
-		scheme: mgr.GetScheme(),
-	}
-
-	svr.Register("/convert", cb)
-
-	return nil
+	// decoder
+	// TODO(droot): make scheme and decoder injectable
 }
 
-type conversionHandler struct {
-	scheme *runtime.Scheme
-}
+// ensure ConversionHandler implements http.Handler
+var _ http.Handler = &ConversionHandler{}
 
-func (cb *conversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (cb *ConversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.Info("got a convert request")
 
@@ -75,7 +43,7 @@ func (cb *conversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	convertReview := apix.ConversionReview{}
 
-	serializer := json.NewSerializer(json.DefaultMetaFactory, cb.scheme, cb.scheme, false)
+	serializer := json.NewSerializer(json.DefaultMetaFactory, cb.Scheme, cb.Scheme, false)
 	_, _, err := serializer.Decode(body, nil, &convertReview)
 	if err != nil {
 		log.Error(err, "error decoding conversion request")
@@ -84,7 +52,7 @@ func (cb *conversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	convertReview.Response = handleConvertRequest(serializer, cb.scheme, convertReview.Request)
+	convertReview.Response = handleConvertRequest(serializer, cb.Scheme, convertReview.Request)
 	convertReview.Response.UID = convertReview.Request.UID
 
 	err = serializer.Encode(&convertReview, w)
