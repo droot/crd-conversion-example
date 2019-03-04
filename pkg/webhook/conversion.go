@@ -10,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 
 	jsonencoding "encoding/json"
 
@@ -23,27 +22,53 @@ var (
 	log = logf.Log.WithName("conversion_webhook")
 )
 
-type ConversionHandler struct {
-	Scheme *runtime.Scheme
+type ConversionWebhook struct {
+	scheme *runtime.Scheme
 
 	once sync.Once
-	// decoder
-	serializer runtime.Serializer
+
+	decoder *Decoder
 }
 
-func (cb *ConversionHandler) setDefaults() {
+func (cb *ConversionWebhook) setDefaults() {
 	cb.once.Do(func() {
-		if cb.Scheme == nil {
-			cb.Scheme = runtime.NewScheme()
+		if cb.scheme == nil {
+			cb.scheme = runtime.NewScheme()
 		}
-		cb.serializer = json.NewSerializer(json.DefaultMetaFactory, cb.Scheme, cb.Scheme, false)
+		decoder, err := NewDecoder(cb.scheme)
+		if err != nil {
+			panic(err)
+		}
+		cb.decoder = decoder
 	})
 }
 
-// ensure ConversionHandler implements http.Handler
-var _ http.Handler = &ConversionHandler{}
+// InjectScheme injects a scheme into the webhook, in order to construct a Decoder.
+func (cb *ConversionWebhook) InjectScheme(s *runtime.Scheme) error {
+	// TODO(directxman12): we should have a better way to pass this down
 
-func (cb *ConversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var err error
+	cb.scheme = s
+	cb.decoder, err = NewDecoder(s)
+	if err != nil {
+		return err
+	}
+
+	// inject the decoder here too, just in case the order of calling this is not
+	// scheme first, then inject func
+	// if w.Handler != nil {
+	// 	if _, err := InjectDecoderInto(w.GetDecoder(), w.Handler); err != nil {
+	// 		return err
+	// 	}
+	// }
+
+	return nil
+}
+
+// ensure ConversionWebhook implements http.Handler
+var _ http.Handler = &ConversionWebhook{}
+
+func (cb *ConversionWebhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cb.setDefaults()
 	log.Info("got a convert request")
 
@@ -55,7 +80,7 @@ func (cb *ConversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	convertReview := apix.ConversionReview{}
 
-	_, _, err := cb.serializer.Decode(body, nil, &convertReview)
+	err := cb.decoder.DecodeInto(body, &convertReview)
 	if err != nil {
 		log.Error(err, "error decoding conversion request")
 		// TODO(droot): define helper for returning conversion error response
@@ -78,18 +103,18 @@ func (cb *ConversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // handles a version conversion request.
-func (cb *ConversionHandler) handleConvertRequest(req *apix.ConversionRequest) *apix.ConversionResponse {
+func (cb *ConversionWebhook) handleConvertRequest(req *apix.ConversionRequest) *apix.ConversionResponse {
 	var convertedObjects []runtime.RawExtension
 
 	for _, obj := range req.Objects {
 		// src, gvk, err := cb.conversionCodecs.UniversalDeserializer().Decode(obj.Raw, nil, nil)
-		src, gvk, err := cb.serializer.Decode(obj.Raw, nil, nil)
+		src, gvk, err := cb.decoder.Decode(obj.Raw)
 		if err != nil {
 			log.Error(err, "error decoding src object")
 		}
 		log.Info("decoding incoming obj", "src", src, "gvk", gvk, "src type", fmt.Sprintf("%T", src))
 
-		dst, err := getTargetObject(cb.Scheme, req.DesiredAPIVersion, gvk.Kind)
+		dst, err := getTargetObject(cb.scheme, req.DesiredAPIVersion, gvk.Kind)
 		if err != nil {
 			log.Error(err, "error getting destination object")
 			return conversionResponseFailureWithMessagef("error converting object")
@@ -107,7 +132,7 @@ func (cb *ConversionHandler) handleConvertRequest(req *apix.ConversionRequest) *
 	}
 }
 
-func (cb *ConversionHandler) convertObject(src, dst runtime.Object) error {
+func (cb *ConversionWebhook) convertObject(src, dst runtime.Object) error {
 	// TODO(droot): figure out a less verbose version of this check
 	if src.GetObjectKind().GroupVersionKind().String() == dst.GetObjectKind().GroupVersionKind().String() {
 		return fmt.Errorf("conversion is not allowed between same type %T", src)
@@ -136,7 +161,7 @@ func (cb *ConversionHandler) convertObject(src, dst runtime.Object) error {
 
 	// neigher src nor dst are Hub, means both of them are spoke, so lets get the hub
 	// version type.
-	hub, err := getHub(cb.Scheme, src)
+	hub, err := getHub(cb.scheme, src)
 	if err != nil {
 		return err
 	}

@@ -78,7 +78,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	cb := &conversionwb.ConversionHandler{Scheme: mgr.GetScheme()}
+	cb := &conversionwb.ConversionWebhook{}
 
 	hookServer.Register("/convert", cb)
 
