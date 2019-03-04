@@ -30,19 +30,6 @@ type ConversionWebhook struct {
 	decoder *Decoder
 }
 
-func (cb *ConversionWebhook) setDefaults() {
-	cb.once.Do(func() {
-		if cb.scheme == nil {
-			cb.scheme = runtime.NewScheme()
-		}
-		decoder, err := NewDecoder(cb.scheme)
-		if err != nil {
-			panic(err)
-		}
-		cb.decoder = decoder
-	})
-}
-
 // InjectScheme injects a scheme into the webhook, in order to construct a Decoder.
 func (cb *ConversionWebhook) InjectScheme(s *runtime.Scheme) error {
 	// TODO(directxman12): we should have a better way to pass this down
@@ -69,7 +56,6 @@ func (cb *ConversionWebhook) InjectScheme(s *runtime.Scheme) error {
 var _ http.Handler = &ConversionWebhook{}
 
 func (cb *ConversionWebhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cb.setDefaults()
 	log.Info("got a convert request")
 
 	var body []byte
