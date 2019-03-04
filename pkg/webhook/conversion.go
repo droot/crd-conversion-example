@@ -12,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 
+	jsonencoding "encoding/json"
+
 	apix "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -24,11 +26,9 @@ var (
 type ConversionHandler struct {
 	Scheme *runtime.Scheme
 
-	serializer runtime.Serializer
-	// decoder
-	// TODO(droot): make scheme and decoder injectable
-
 	once sync.Once
+	// decoder
+	serializer runtime.Serializer
 }
 
 func (cb *ConversionHandler) setDefaults() {
@@ -37,7 +37,6 @@ func (cb *ConversionHandler) setDefaults() {
 			cb.Scheme = runtime.NewScheme()
 		}
 		cb.serializer = json.NewSerializer(json.DefaultMetaFactory, cb.Scheme, cb.Scheme, false)
-		// conversionCodecs := serializer.NewCodecFactory(cb.Scheme)
 	})
 }
 
@@ -56,7 +55,6 @@ func (cb *ConversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	convertReview := apix.ConversionReview{}
 
-	// serializer := json.NewSerializer(json.DefaultMetaFactory, cb.Scheme, cb.Scheme, false)
 	_, _, err := cb.serializer.Decode(body, nil, &convertReview)
 	if err != nil {
 		log.Error(err, "error decoding conversion request")
@@ -68,7 +66,8 @@ func (cb *ConversionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	convertReview.Response = cb.handleConvertRequest(convertReview.Request)
 	convertReview.Response.UID = convertReview.Request.UID
 
-	err = cb.serializer.Encode(&convertReview, w)
+	err = jsonencoding.NewEncoder(w).Encode(&convertReview)
+	// err = cb.serializer.Encode(&convertReview, w)
 	if err != nil {
 		log.Error(err, "error encoding conversion request")
 		// TODO(droot): define helper for returning conversion error
