@@ -6,6 +6,7 @@ WORKDIR /go/src/github.com/droot/crd-conversion-example
 COPY pkg/    pkg/
 COPY cmd/    cmd/
 COPY vendor/ vendor/
+COPY ../../../sigs.k8s.io/controller-runtime vendor/sigs.k8s.io/
 
 # Build
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager github.com/droot/crd-conversion-example/cmd/manager

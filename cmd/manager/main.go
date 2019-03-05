@@ -21,13 +21,13 @@ import (
 
 	"github.com/droot/crd-conversion-example/pkg/apis"
 	"github.com/droot/crd-conversion-example/pkg/controller"
-	conversionwb "github.com/droot/crd-conversion-example/pkg/webhook"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"sigs.k8s.io/controller-runtime/pkg/runtime/signals"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	conversionwb "sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
 )
 
 func main() {
@@ -78,7 +78,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	cb := &conversionwb.ConversionWebhook{}
+	cb := &conversionwb.Webhook{}
 
 	hookServer.Register("/convert", cb)
 

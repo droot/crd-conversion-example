@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= gcr.io/sunilarora-sandbox/crd-conversion-example:1.0.47
+IMG ?= gcr.io/sunilarora-sandbox/crd-conversion-example:1.0.48
 
 all: test manager
 
@@ -45,9 +45,18 @@ ifndef GOPATH
 endif
 	go generate ./pkg/... ./cmd/...
 
+crcopy:
+	rm -f ./vendor/sigs.k8s.io/controller-runtime
+	cp -a ~/go/src/sigs.k8s.io/controller-runtime ./vendor/sigs.k8s.io/
+
+
+crlink:
+	rm -rf ./vendor/sigs.k8s.io/controller-runtime
+	ln -sf ~/go/src/sigs.k8s.io/controller-runtime ./vendor/sigs.k8s.io/
+
 # Build the docker image
 docker-build: #test
-	docker build . -t ${IMG}
+	docker build -f ~/Dockerfile . -t ${IMG}
 	@echo "updating kustomize image patch file for manager resource"
 	sed -i'' -e 's@image: .*@image: '"${IMG}"'@' ./config/default/manager_image_patch.yaml
 
